@@ -13,8 +13,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+import asyncpg
 import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -25,6 +27,7 @@ from .db import Database
 from .demo import DemoError, DemoRunner
 from .evaluation import FAULT_SIGNATURE, BenchmarkManager, live_summary
 from .explain import bad_direction, explain
+from .history import to_csv
 from .ml import MODEL_VERSION, TwinModels
 from .mqtt import MqttBridge
 from .scenario import BASELINE, PRESETS, STRATEGIES, ScenarioParams, run_scenario
@@ -303,6 +306,31 @@ async def scenario_config():
 @app.post("/api/scenarios/run")
 async def scenario_run(body: ScenarioRequest):
     return await asyncio.to_thread(run_scenario, ScenarioParams(**body.model_dump()))
+
+
+# ----------------------------------------------------------------- geçmiş
+@app.get("/api/history")
+async def history(days: int = Query(7, ge=1, le=365), tz: str = Query("UTC", max_length=64)):
+    try:
+        data = await db.history(days, tz)
+    except asyncpg.InvalidParameterValueError as exc:
+        raise HTTPException(422, f"Geçersiz saat dilimi: {tz}") from exc
+    for row in data["top_assets"]:
+        row["name"] = twin.names.get(row["asset_id"], row["asset_id"])
+        row["type"] = twin.types.get(row["asset_id"])
+    return {"days": days, "tz": tz, **data}
+
+
+@app.get("/api/history/export")
+async def history_export(kind: Literal["alerts", "work_orders"], days: int = Query(7, ge=1, le=365),
+                         tz: str = Query("UTC", max_length=64)):
+    try:
+        rows = await db.export_rows(kind, days, tz)
+    except asyncpg.InvalidParameterValueError as exc:
+        raise HTTPException(422, f"Geçersiz saat dilimi: {tz}") from exc
+    name = {"alerts": "alarmlar", "work_orders": "is-emirleri"}[kind]
+    return Response(to_csv(kind, rows), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="railtwin-{name}-{days}g.csv"'})
 
 
 # ---------------------------------------------------------- model performansı

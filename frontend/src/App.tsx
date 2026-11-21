@@ -5,6 +5,7 @@ import { useLive } from "./live";
 import Overview from "./pages/Overview";
 import Assets from "./pages/Assets";
 import AssetDetail from "./pages/AssetDetail";
+import History from "./pages/History";
 import Maintenance from "./pages/Maintenance";
 import Model from "./pages/Model";
 import Scenarios from "./pages/Scenarios";
@@ -13,6 +14,7 @@ const NAV = [
   { to: "/", label: "Genel Bakış", end: true },
   { to: "/assets", label: "Varlıklar" },
   { to: "/maintenance", label: "Bakım" },
+  { to: "/history", label: "Geçmiş" },
   { to: "/scenarios", label: "Senaryolar" },
   { to: "/model", label: "Model" },
 ];
@@ -66,6 +68,7 @@ export default function App() {
           <Route path="/assets" element={<Assets />} />
           <Route path="/assets/:id" element={<AssetDetail />} />
           <Route path="/maintenance" element={<Maintenance />} />
+          <Route path="/history" element={<History />} />
           <Route path="/scenarios" element={<Scenarios />} />
           <Route path="/model" element={<Model />} />
         </Routes>

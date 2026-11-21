@@ -48,6 +48,8 @@ export interface Alert {
   severity: Severity;
   source: "rule" | "ml";
   message: string;
+  /** Backend yeniden başlarken kapatıldı; gerçek süresi bilinmiyor. */
+  closed_on_restart?: boolean;
 }
 
 export interface Kpis {
@@ -150,6 +152,29 @@ export interface Performance {
     summary: { trials: number; detected: number; missed: number; mean_detect_s: number | null; cause_accuracy: number | null };
     trials: FaultTrial[];
   };
+}
+
+export interface History {
+  days: number;
+  tz: string;
+  /** Zaman dağılımının gruplama birimi; gruplar istenen saat diliminde, saat dilimi bilgisi olmadan. */
+  unit: "hour" | "day";
+  totals: {
+    alerts: number;
+    critical: number;
+    warning: number;
+    ml: number;
+    rule: number;
+    assets_affected: number;
+    median_alert_s: number | null;
+    work_orders: number;
+    mean_response_s: number | null;
+  };
+  timeline: { bucket: string; critical: number; warning: number; work_orders: number }[];
+  top_assets: { asset_id: string; name: string; type: AssetType | null; alerts: number; critical: number; work_orders: number }[];
+  causes: { cause: string | null; work_orders: number }[];
+  alerts: Alert[];
+  work_orders: WorkOrder[];
 }
 
 export interface WorkOrder {
@@ -285,6 +310,10 @@ export const api = {
   maintenance: () => request<{ assets: AssetView[]; work_orders: WorkOrder[] }>("/api/maintenance"),
   scenarioConfig: () => request<ScenarioConfig>("/api/scenarios/config"),
   runScenario: (params: ScenarioParams) => post<ScenarioResult>("/api/scenarios/run", params),
+  history: (days: number, tz: string) =>
+    request<History>(`/api/history?days=${days}&tz=${encodeURIComponent(tz)}`),
+  exportUrl: (kind: "alerts" | "work_orders", days: number, tz: string) =>
+    `/api/history/export?kind=${kind}&days=${days}&tz=${encodeURIComponent(tz)}`,
   performance: () => request<Performance>("/api/model/performance"),
   runBenchmark: () => post<BenchmarkState>("/api/model/benchmark"),
   startDemo: () => post<DemoState>("/api/demo/start"),

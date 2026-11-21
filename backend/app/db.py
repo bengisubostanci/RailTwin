@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS alerts (
     message      TEXT        NOT NULL
 );
 CREATE INDEX IF NOT EXISTS alerts_open ON alerts (resolved_at) WHERE resolved_at IS NULL;
+-- Backend yeniden başlarken kapatılan alarmlar: gerçek süreleri bilinmez, istatistiklere girmez.
+ALTER TABLE alerts ADD COLUMN IF NOT EXISTS closed_on_restart BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS work_orders (
     id           BIGSERIAL PRIMARY KEY,
@@ -104,8 +106,12 @@ class Database:
                     f"SELECT add_retention_policy('{table}', $1::text::interval, if_not_exists => TRUE)",
                     self.retention,
                 )
-            # Önceki çalışmadan açık kalan alarmlar artık izlenemez; bunları kapat.
-            await conn.execute("UPDATE alerts SET resolved_at = now() WHERE resolved_at IS NULL")
+            # Önceki çalışmadan açık kalan alarmlar artık izlenemez; bunları sistemin kapandığı anla
+            # (son kayıtlı telemetri) kapat ve işaretle ki kapalı kalınan süre alarm süresi sayılmasın.
+            await conn.execute("""
+                UPDATE alerts SET closed_on_restart = TRUE,
+                       resolved_at = greatest(created_at, coalesce((SELECT max(time) FROM telemetry), now()))
+                WHERE resolved_at IS NULL""")
 
     async def close(self) -> None:
         if self.pool:
@@ -243,6 +249,91 @@ class Database:
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("SELECT * FROM work_orders ORDER BY created_at DESC LIMIT $1", limit)
         return [_row(r) for r in rows]
+
+
+    # ----------------------------------------------------------------- geçmiş
+    async def history(self, days: int, tz: str, limit: int = 200) -> dict:
+        """Son `days` gündeki alarm ve iş emirlerinin özeti, zaman dağılımı ve listeleri."""
+        unit = "hour" if days <= 2 else "day"
+        since = "now() - make_interval(days => $1)"
+        async with self.pool.acquire() as conn:
+            totals = await conn.fetchrow(f"""
+                SELECT count(*) AS alerts,
+                       count(*) FILTER (WHERE severity = 'critical') AS critical,
+                       count(*) FILTER (WHERE severity = 'warning') AS warning,
+                       count(*) FILTER (WHERE source = 'ml') AS ml,
+                       count(*) FILTER (WHERE source = 'rule') AS rule,
+                       count(DISTINCT asset_id) AS assets_affected,
+                       percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM resolved_at - created_at))
+                           FILTER (WHERE resolved_at IS NOT NULL AND NOT closed_on_restart) AS median_alert_s
+                FROM alerts WHERE created_at > {since}""", days)
+            orders = await conn.fetchrow(f"""
+                SELECT count(*) AS work_orders, avg(extract(epoch FROM w.created_at - first_alert)) AS mean_response_s
+                FROM work_orders w
+                LEFT JOIN LATERAL (
+                    -- Varlıkta iş emri anında hâlâ açık olan alarm bölümünün ilk alarmı.
+                    SELECT min(a.created_at) AS first_alert FROM alerts a
+                    WHERE a.asset_id = w.asset_id AND a.created_at <= w.created_at
+                      AND a.created_at > w.created_at - interval '6 hours'
+                      AND (a.resolved_at IS NULL OR a.resolved_at >= w.created_at)
+                ) fa ON TRUE
+                WHERE w.created_at > {since}""", days)
+            timeline = await conn.fetch(f"""
+                WITH a AS (
+                    SELECT date_trunc('{unit}', created_at AT TIME ZONE $2) AS b,
+                           count(*) FILTER (WHERE severity = 'critical') AS critical,
+                           count(*) FILTER (WHERE severity = 'warning') AS warning
+                    FROM alerts WHERE created_at > {since} GROUP BY 1),
+                w AS (
+                    SELECT date_trunc('{unit}', created_at AT TIME ZONE $2) AS b, count(*) AS work_orders
+                    FROM work_orders WHERE created_at > {since} GROUP BY 1)
+                SELECT coalesce(a.b, w.b) AS bucket, coalesce(a.critical, 0) AS critical,
+                       coalesce(a.warning, 0) AS warning, coalesce(w.work_orders, 0) AS work_orders
+                FROM a FULL JOIN w ON a.b = w.b ORDER BY 1""", days, tz)
+            top = await conn.fetch(f"""
+                SELECT asset_id, count(*) AS alerts, count(*) FILTER (WHERE severity = 'critical') AS critical,
+                       (SELECT count(*) FROM work_orders w WHERE w.asset_id = a.asset_id AND w.created_at > {since})
+                           AS work_orders
+                FROM alerts a WHERE created_at > {since}
+                GROUP BY asset_id ORDER BY alerts DESC, critical DESC LIMIT 8""", days)
+            causes = await conn.fetch(f"""
+                SELECT cause, count(*) AS work_orders FROM work_orders
+                WHERE created_at > {since} GROUP BY cause ORDER BY 2 DESC""", days)
+            alerts = await conn.fetch(f"""
+                SELECT * FROM alerts WHERE created_at > {since} ORDER BY created_at DESC LIMIT $2""", days, limit)
+            work_orders = await conn.fetch(f"""
+                SELECT * FROM work_orders WHERE created_at > {since} ORDER BY created_at DESC LIMIT $2""", days, limit)
+
+        def num(v):
+            return None if v is None else round(float(v), 1)
+
+        return {
+            "unit": unit,
+            "totals": {**{k: totals[k] for k in ("alerts", "critical", "warning", "ml", "rule", "assets_affected")},
+                       "median_alert_s": num(totals["median_alert_s"]), "work_orders": orders["work_orders"],
+                       "mean_response_s": num(orders["mean_response_s"])},
+            # Gruplar kullanıcının saat diliminde; saat dilimi bilgisi olmadan döner.
+            "timeline": [{**dict(r), "bucket": r["bucket"].isoformat()} for r in timeline],
+            "top_assets": [dict(r) for r in top],
+            "causes": [dict(r) for r in causes],
+            "alerts": [_row(r) for r in alerts],
+            "work_orders": [_row(r) for r in work_orders],
+        }
+
+    async def export_rows(self, kind: str, days: int, tz: str) -> list[asyncpg.Record]:
+        """CSV için satırlar; zamanlar kullanıcının saat diliminde metin olarak."""
+        local = "to_char({} AT TIME ZONE $2, 'YYYY-MM-DD HH24:MI:SS')"
+        columns = {
+            "alerts": f"id, {local.format('created_at')} AS created, {local.format('resolved_at')} AS resolved, "
+                      "asset_id, severity, source, key, message, acknowledged",
+            "work_orders": f"id, {local.format('created_at')} AS created, asset_id, action, cause, "
+                           "round(health::numeric, 1) AS health, status",
+        }[kind]
+        async with self.pool.acquire() as conn:
+            return await conn.fetch(
+                f"SELECT {columns} FROM {kind} WHERE created_at > now() - make_interval(days => $1) ORDER BY created_at",
+                days, tz,
+            )
 
 
 def _row(row: asyncpg.Record) -> dict:
