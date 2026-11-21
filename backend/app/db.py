@@ -30,6 +30,16 @@ CREATE TABLE IF NOT EXISTS telemetry (
 SELECT create_hypertable('telemetry', 'time', if_not_exists => TRUE);
 CREATE INDEX IF NOT EXISTS telemetry_asset_metric_time ON telemetry (asset_id, metric, time DESC);
 
+-- Modelin çıktısı: "health" satırları sağlık puanı, diğerleri sensör başına sapma (σ).
+CREATE TABLE IF NOT EXISTS scores (
+    time      TIMESTAMPTZ      NOT NULL,
+    asset_id  TEXT             NOT NULL,
+    metric    TEXT             NOT NULL,
+    value     DOUBLE PRECISION NOT NULL
+);
+SELECT create_hypertable('scores', 'time', if_not_exists => TRUE);
+CREATE INDEX IF NOT EXISTS scores_asset_metric_time ON scores (asset_id, metric, time DESC);
+
 CREATE TABLE IF NOT EXISTS alerts (
     id           BIGSERIAL PRIMARY KEY,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -62,6 +72,7 @@ class Database:
         self.retention = retention
         self.pool: asyncpg.Pool | None = None
         self._buffer: list[tuple] = []
+        self._scores: list[tuple] = []
 
     async def connect(self, attempts: int = 30) -> None:
         for attempt in range(1, attempts + 1):
@@ -75,9 +86,11 @@ class Database:
             raise RuntimeError("Veritabanına bağlanılamadı")
         async with self.pool.acquire() as conn:
             await conn.execute(SCHEMA)
-            await conn.execute(
-                "SELECT add_retention_policy('telemetry', $1::text::interval, if_not_exists => TRUE)", self.retention
-            )
+            for table in ("telemetry", "scores"):
+                await conn.execute(
+                    f"SELECT add_retention_policy('{table}', $1::text::interval, if_not_exists => TRUE)",
+                    self.retention,
+                )
             # Önceki çalışmadan açık kalan alarmlar artık izlenemez; bunları kapat.
             await conn.execute("UPDATE alerts SET resolved_at = now() WHERE resolved_at IS NULL")
 
@@ -90,18 +103,34 @@ class Database:
         for metric, value in reading["metrics"].items():
             self._buffer.append((ts, reading["asset_id"], metric, float(value)))
 
+    def buffer_scores(self, ts: datetime, asset_id: str, values: dict[str, float]) -> None:
+        for metric, value in values.items():
+            self._scores.append((ts, asset_id, metric, float(value)))
+
     async def flush(self) -> int:
-        if not self._buffer or not self.pool:
+        if not self.pool:
             return 0
-        rows, self._buffer = self._buffer, []
-        async with self.pool.acquire() as conn:
-            await conn.copy_records_to_table("telemetry", records=rows, columns=["time", "asset_id", "metric", "value"])
-        return len(rows)
+        written = 0
+        for table, attr in (("telemetry", "_buffer"), ("scores", "_scores")):
+            rows = getattr(self, attr)
+            if not rows:
+                continue
+            setattr(self, attr, [])
+            async with self.pool.acquire() as conn:
+                await conn.copy_records_to_table(table, records=rows, columns=["time", "asset_id", "metric", "value"])
+            written += len(rows)
+        return written
 
     async def telemetry(self, asset_id: str, minutes: int, bucket_s: int) -> dict[str, list[dict]]:
-        query = """
+        return await self._series("telemetry", asset_id, minutes, bucket_s)
+
+    async def scores(self, asset_id: str, minutes: int, bucket_s: int) -> dict[str, list[dict]]:
+        return await self._series("scores", asset_id, minutes, bucket_s)
+
+    async def _series(self, table: str, asset_id: str, minutes: int, bucket_s: int) -> dict[str, list[dict]]:
+        query = f"""
             SELECT time_bucket(make_interval(secs => $3), time) AS bucket, metric, avg(value) AS value
-            FROM telemetry
+            FROM {table}
             WHERE asset_id = $1 AND time > now() - make_interval(mins => $2)
             GROUP BY bucket, metric
             ORDER BY bucket

@@ -16,6 +16,7 @@ sonuçlanacağını gösterir.
 | **Canlı izleme** | Trenlerin gerçek zamanlı hareket ettiği hat şeması, KPI'lar, varlık başına sensör grafikleri ve alarm akışı. |
 | **Kestirimci bakım** | Varlık başına ML sağlık puanı (%0–100), olası arızalı bileşen, eğilime dayalı kritiğe kalan süre tahmini ve önceliklendirilmiş iş kuyruğu. |
 | **Arıza enjeksiyonu** | Arayüzden bir bozulma (rulman aşırı ısınması, tekerlek düzlüğü, fren kaçağı, ray kusuru, makas aşınması, …) enjekte edin ve modelin onu yakalamasını izleyin. Ardından gidermek için bakım ekibi gönderin. |
+| **Sağlık neden düştü?** | Varlık detayında, her sensörün beklenen değerden sapmasının zaman grafiği ve son düşüşün açıklaması: sapmanın hangi sensörde ve ne zaman başladığı, eşiklerin ne zaman aşıldığı, diğer sensörlerin normal kalıp kalmadığı ve modelin sorunu sağlık sarı bölgeye inmeden ne kadar önce gördüğü. Geçmiş veritabanında tutulur, sayfa yenilenince kaybolmaz. |
 | **Demo modu** | Tek tıkla baştan sona bir arıza hikâyesi: sağlıklı bir trene rulman arızası enjekte edilir, modelin fark etmesi, kritik alarm, bakım ekibinin gönderilmesi ve toparlanma Genel Bakış'ta adım adım gösterilir. Sunumlar için. |
 | **Senaryo analizi** | Sefer aralığını, filo büyüklüğünü, talebi, hava durumunu, hat hızını veya bakım stratejisini değiştirin; dakiklik, arızalar, hat aşınması, enerji, CO₂ ve maliyeti bugünkü mevcut durumla karşılaştırın (Monte Carlo). |
 
@@ -62,6 +63,10 @@ Tepe değeri tutma ve yumuşatma, aralıklı kanıtların etkisini korur; böyle
 geçerken görünen bir ray kusuru da hesaba katılır. Referans, hava durumu ve talep için tabakalı bir
 ızgarayı kapsar; bu yüzden sıcaklık kaydırıcısını −15 °C'den 45 °C'ye çevirmek yanlış alarm üretmez.
 Testler bunu ve her arıza türünün tespitini ve doğru sebebe atanmasını kontrol eder.
+
+Sağlık puanı ve sensör sapmaları 5 saniyede bir `scores` hypertable'ına yazılır. "Sağlık neden düştü?"
+açıklaması bu geçmişten üretilir: son düşüşün sakin dönemden ayrıldığı an bulunur, sapmanın 3σ eşiğini ilk
+aştığı sensör ve zaman, sağlığın %75 ve %45 eşiklerini geçtiği anlar ve toparlanma çıkarılır.
 
 ## Hızlı başlangıç
 
@@ -139,6 +144,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173, /api ve /ws
 | GET | `/api/topology` | Hat yerleşimi |
 | GET | `/api/state` | Canlı anlık görüntü (varlıklar, sağlık, KPI'lar, aktif alarmlar) |
 | GET | `/api/assets/{id}/telemetry?minutes=15&bucket_s=5` | Zaman aralıklarına bölünmüş geçmiş |
+| GET | `/api/assets/{id}/explanation?minutes=30` | Sağlık ve sensör sapması geçmişi, son düşüşün açıklaması |
 | POST | `/api/assets/{id}/faults` | Bozulma enjekte et `{ "kind": "wheel_flat" }` |
 | POST | `/api/assets/{id}/maintenance` | Bakım ekibi gönder (arızayı giderir, iş emri kaydeder) |
 | POST | `/api/environment` | Sahadaki ortam sıcaklığını / yolcu talebini ayarla |

@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Area, AreaChart, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { api, FAULT_LABELS, TYPE_LABELS, metricLabel, metricUnit, statusLabel, SWITCH_POSITION_LABELS, type AssetType, type Series } from "../api";
+import { api, FAULT_LABELS, TYPE_LABELS, metricLabel, metricUnit, statusLabel, SWITCH_POSITION_LABELS, type AssetType, type ExplanationResponse, type Series } from "../api";
 import { Empty, HealthBadge, Panel, fmtTime, num, pct } from "../components/common";
+import ExplainPanel from "../components/ExplainPanel";
 import LineMap from "../components/LineMap";
+
+const EXPLAIN_MINUTES = 30;
 import { useLive } from "../live";
 
 const CHART_METRICS: Record<AssetType, string[]> = {
@@ -30,6 +33,7 @@ export default function AssetDetail() {
   const [faultKinds, setFaultKinds] = useState<string[]>([]);
   const [fault, setFault] = useState("");
   const [past, setPast] = useState<Series>({});
+  const [explanation, setExplanation] = useState<ExplanationResponse | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -41,6 +45,19 @@ export default function AssetDetail() {
       setFault(a.fault_kinds?.[0] ?? "");
     }, () => setFaultKinds([]));
     api.telemetry(id, 15, 5).then(setPast, () => setPast({}));
+  }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setExplanation(null);
+    const load = () =>
+      api.explanation(id, EXPLAIN_MINUTES).then((r) => !cancelled && setExplanation(r), () => undefined);
+    load();
+    const timer = setInterval(load, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [id]);
 
   const live = history[id] ?? [];
@@ -78,7 +95,12 @@ export default function AssetDetail() {
   };
 
   const zEntries = Object.entries(asset.z);
-  const healthRows = live.map((p) => ({ t: p.t, health: p.health }));
+  // Kayıtlı geçmiş (5 sn'de bir) + bu oturumun saniyelik canlı noktaları.
+  const firstLive = live.length ? live[0].t : Infinity;
+  const healthRows = [
+    ...(explanation?.health ?? []).map((p) => ({ t: new Date(p.t).getTime(), health: p.v })).filter((p) => p.t < firstLive),
+    ...live.map((p) => ({ t: p.t, health: p.health })),
+  ];
 
   return (
     <div className="page">
@@ -164,7 +186,7 @@ export default function AssetDetail() {
           </div>
         </Panel>
 
-        <Panel title="Sağlık (bu oturum)">
+        <Panel title={`Sağlık (son ${EXPLAIN_MINUTES} dk)`}>
           <ResponsiveContainer width="100%" height={180}>
             <AreaChart data={healthRows} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
               <defs>
@@ -186,6 +208,8 @@ export default function AssetDetail() {
           </div>
         </Panel>
       </div>
+
+      <ExplainPanel data={explanation} minutes={EXPLAIN_MINUTES} />
 
       <div className="charts">
         {CHART_METRICS[asset.type].map((m) => (

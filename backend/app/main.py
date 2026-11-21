@@ -8,6 +8,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import asdict
+from datetime import datetime
 from typing import Literal
 
 import redis.asyncio as aioredis
@@ -20,6 +21,7 @@ from twin_core import FAULT_KINDS
 from .config import settings
 from .db import Database
 from .demo import DemoError, DemoRunner
+from .explain import bad_direction, explain
 from .ml import TwinModels
 from .mqtt import MqttBridge
 from .scenario import BASELINE, PRESETS, STRATEGIES, ScenarioParams, run_scenario
@@ -171,6 +173,29 @@ async def asset_telemetry(asset_id: str, minutes: int = Query(15, ge=1, le=1440)
                           bucket_s: int = Query(5, ge=1, le=3600)):
     _require_asset(asset_id)
     return await db.telemetry(asset_id, minutes, bucket_s)
+
+
+@app.get("/api/assets/{asset_id}/explanation")
+async def asset_explanation(asset_id: str, minutes: int = Query(30, ge=5, le=1440)):
+    """Sağlık ve sensör sapması geçmişi ile son sağlık düşüşünün açıklaması."""
+    asset_type = _require_asset(asset_id)
+    bucket_s = max(5, minutes * 60 // 360)  # grafik başına en fazla ~360 nokta
+    raw = await db.scores(asset_id, minutes, bucket_s)
+
+    def points(series: list[dict]) -> list[tuple[datetime, float]]:
+        return [(datetime.fromisoformat(p["t"]), p["v"]) for p in series]
+
+    def out(series: list[tuple[datetime, float]], digits: int) -> list[dict]:
+        return [{"t": t.isoformat(), "v": round(v, digits)} for t, v in series]
+
+    health = points(raw.pop("health", []))
+    bad_z = bad_direction(asset_type, {metric: points(series) for metric, series in raw.items()})
+    return {
+        "bucket_s": bucket_s,
+        "health": out(health, 1),
+        "z": {metric: out(series, 2) for metric, series in bad_z.items()},
+        "explanation": explain(health, bad_z),
+    }
 
 
 class FaultRequest(BaseModel):

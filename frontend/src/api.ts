@@ -162,6 +162,37 @@ export interface ScenarioConfig {
 
 export type Series = Record<string, { t: string; v: number }[]>;
 
+/** Son sağlık düşüşünün yapılandırılmış açıklaması (zamanlar ISO metin). */
+export interface Explanation {
+  start: string;
+  start_truncated: boolean;
+  cause: string | null;
+  onset: { t: string; metric: string } | null;
+  peak_z: Record<string, number>;
+  others_normal: boolean;
+  /** Ana sapmanın ardından başlayan, ondan küçük sapmalar (büyük olasılıkla yan etki). */
+  secondary: string[];
+  /** Ana sapmayla aynı anda veya önce başlayan ya da onun kadar büyük sapmalar. */
+  independent: string[];
+  min_health: number;
+  min_at: string;
+  degraded_at: string | null;
+  critical_at: string | null;
+  recovered_at: string | null;
+  ongoing: boolean;
+  /** Sapma başlangıcından sağlığın %75'in altına inmesine kadar geçen saniye. */
+  lead_s: number | null;
+  z_onset: number;
+}
+
+export interface ExplanationResponse {
+  bucket_s: number;
+  health: { t: string; v: number }[];
+  /** Sensör başına sapma; pozitif değer her zaman "daha kötü" yöndedir. */
+  z: Series;
+  explanation: Explanation | null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -187,6 +218,8 @@ export const api = {
   asset: (id: string) => request<AssetView>(`/api/assets/${id}`),
   telemetry: (id: string, minutes = 15, bucket = 5) =>
     request<Series>(`/api/assets/${id}/telemetry?minutes=${minutes}&bucket_s=${bucket}`),
+  explanation: (id: string, minutes = 30) =>
+    request<ExplanationResponse>(`/api/assets/${id}/explanation?minutes=${minutes}`),
   injectFault: (id: string, kind: string | null) => post(`/api/assets/${id}/faults`, { kind }),
   dispatch: (id: string) => post<WorkOrder>(`/api/assets/${id}/maintenance`),
   setEnvironment: (body: { ambient_c?: number; load_factor?: number }) => post("/api/environment", body),

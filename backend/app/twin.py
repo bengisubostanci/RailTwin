@@ -7,7 +7,7 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass
 
-from .db import Database
+from .db import Database, utcnow
 from .ml import EWMA_TAU_S, SPECS, WARMUP_TAUS, AssetHealth, FeatureBuilder, Score, TwinModels
 
 log = logging.getLogger(__name__)
@@ -60,6 +60,7 @@ DEFAULT_ACTION = {"train": "Genel depo muayenesi", "segment": "Yürüyerek hat k
 ML_WARNING = 65.0
 ML_CRITICAL = 45.0
 ALERT_CLEAR_S = 20.0
+SCORE_EVERY_S = 5.0  # sağlık ve sapma geçmişinin veritabanına yazılma aralığı
 SEVERITY_RANK = {None: 0, "warning": 1, "critical": 2}
 
 
@@ -79,6 +80,7 @@ class LiveTwin:
         self.active_alerts: dict[tuple[str, str], dict] = {}
         self._clear_since: dict[tuple[str, str], float] = {}
         self._last_eval = time.monotonic()
+        self._last_score_write = 0.0
         self.events: list[dict] = []
         self.mqtt_connected = False
         self.environment = {"ambient_c": 18.0, "load_factor": 0.6}
@@ -151,6 +153,13 @@ class LiveTwin:
             scores: list[Score] = self.models.score(asset_type, [self.features[i] for i in ids])
             for asset_id, score in zip(ids, scores):
                 self.health[asset_id].update(score, now, dt)
+        if now - self._last_score_write >= SCORE_EVERY_S:
+            self._last_score_write = now
+            ts = utcnow()
+            for ids in by_type.values():
+                for asset_id in ids:
+                    h = self.health[asset_id]
+                    self.db.buffer_scores(ts, asset_id, {"health": h.health, **h.z})
         await self._evaluate_alerts(now)
 
     async def _evaluate_alerts(self, now: float) -> None:

@@ -1,8 +1,11 @@
 """Dedektörün uçtan uca kontrolü: sağlıklı bir hat sağlıklı kalır, her arıza
 türü yakalanır ve doğru sensöre atfedilir."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
+from app.explain import bad_direction, explain
 from app.ml import AssetHealth, FeatureBuilder, TwinModels
 from twin_core import TwinEngine
 
@@ -101,3 +104,38 @@ def test_repair_restores_health(models):
     engine.repair("SW-01")
     run_live(models, engine, 400, builder, health)
     assert health["SW-01"].health > 80
+
+
+def test_explanation_names_the_failing_bearing_before_health_turns_red(models):
+    """Gerçek motor ve modelle: kayıtlı geçmişten üretilen açıklama, arızalı sensörü
+    ve sapmanın sağlık eşiğinden önce başladığını göstermeli."""
+    engine = TwinEngine(seed=21, time_scale=TIME_SCALE)
+    builder = FeatureBuilder(TIME_SCALE)
+    health = AssetHealth()
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    h_series, z_series = [], {}
+    repaired = False
+    for t in range(1200):
+        if t == 400:
+            engine.inject_fault("T-103", "bearing_overheat")
+        for r in engine.step(1.0):
+            features = builder.update(r, 1.0)
+            if r["asset_id"] == "T-103" and builder.is_warm("T-103", "train"):
+                health.update(models.score("train", [features])[0], float(t), 1.0)
+        if not repaired and health.health < 30:
+            engine.repair("T-103")
+            repaired = True
+        if t % 5 == 0 and health.z:  # canlı ikiz gibi 5 saniyede bir kaydet
+            ts = t0 + timedelta(seconds=t)
+            h_series.append((ts, health.health))
+            for metric, z in health.z.items():
+                z_series.setdefault(metric, []).append((ts, z))
+
+    assert repaired, "arıza kritik seviyeye ulaşmadı"
+    e = explain(h_series, bad_direction("train", z_series))
+    assert e is not None
+    assert e["cause"] == "bearing_temp_c"
+    assert e["onset"]["metric"] == "bearing_temp_c"
+    assert e["onset"]["t"] >= (t0 + timedelta(seconds=400)).isoformat(), "sapma arızadan önce başlayamaz"
+    assert e["lead_s"] is not None and e["lead_s"] > 0
+    assert e["recovered_at"] is not None
