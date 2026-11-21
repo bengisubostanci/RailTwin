@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { demoStepNumber } from "./components/DemoPanel";
 import { useLive } from "./live";
 import Overview from "./pages/Overview";
 import Assets from "./pages/Assets";
@@ -47,6 +48,11 @@ export default function App() {
           ))}
         </nav>
         <div className="conn">
+          {snapshot?.demo?.state === "running" && pathname !== "/" && (
+            <Link to="/" className="demo-pill" title="Demoyu Genel Bakış'ta izle">
+              <span className="dot pulse" /> Demo · adım {demoStepNumber(snapshot.demo)}/{snapshot.demo.steps.length}
+            </Link>
+          )}
           {snapshot && snapshot.time_scale > 1 && <span className="muted">sim ×{snapshot.time_scale}</span>}
           <span className={`dot ${status.cls}`} />
           {status.text}

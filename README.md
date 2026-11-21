@@ -16,6 +16,7 @@ sonuçlanacağını gösterir.
 | **Canlı izleme** | Trenlerin gerçek zamanlı hareket ettiği hat şeması, KPI'lar, varlık başına sensör grafikleri ve alarm akışı. |
 | **Kestirimci bakım** | Varlık başına ML sağlık puanı (%0–100), olası arızalı bileşen, eğilime dayalı kritiğe kalan süre tahmini ve önceliklendirilmiş iş kuyruğu. |
 | **Arıza enjeksiyonu** | Arayüzden bir bozulma (rulman aşırı ısınması, tekerlek düzlüğü, fren kaçağı, ray kusuru, makas aşınması, …) enjekte edin ve modelin onu yakalamasını izleyin. Ardından gidermek için bakım ekibi gönderin. |
+| **Demo modu** | Tek tıkla baştan sona bir arıza hikâyesi: sağlıklı bir trene rulman arızası enjekte edilir, modelin fark etmesi, kritik alarm, bakım ekibinin gönderilmesi ve toparlanma Genel Bakış'ta adım adım gösterilir. Sunumlar için. |
 | **Senaryo analizi** | Sefer aralığını, filo büyüklüğünü, talebi, hava durumunu, hat hızını veya bakım stratejisini değiştirin; dakiklik, arızalar, hat aşınması, enerji, CO₂ ve maliyeti bugünkü mevcut durumla karşılaştırın (Monte Carlo). |
 
 ## Mimari
@@ -93,6 +94,12 @@ Ayarlar (ortam değişkenleri, ör. bir `.env` dosyasında):
 
 ### İki dakikalık demo
 
+En hızlı yol: **Genel Bakış**'ta **Demoyu başlat**'a tıklayın. Demo bir tren seçer, arızayı enjekte eder,
+modeli bekler, bakım ekibini gönderir ve her adımı açıklamasıyla gösterir (yaklaşık 2 dakika).
+Demo durdurulursa enjekte ettiği arızayı kendisi temizler.
+
+Elle denemek için:
+
 1. **Genel Bakış**: trenlerin hareketini izleyin. Sıcaklık kaydırıcısını 40 °C'ye çekin; rulman
    sıcaklıkları yükselir, ancak model bunu beklediği için sağlık yeşil kalır.
 2. Bir tren açın (ör. **T-103**), *Rulman aşırı ısınması*'nı seçin ve **Arıza enjekte et**'e tıklayın.
@@ -137,4 +144,6 @@ cd frontend && npm install && npm run dev   # http://localhost:5173, /api ve /ws
 | POST | `/api/environment` | Sahadaki ortam sıcaklığını / yolcu talebini ayarla |
 | GET | `/api/maintenance` | Önceliklendirilmiş kuyruk ve iş emirleri |
 | POST | `/api/scenarios/run` | Senaryo analizi çalıştır |
+| POST | `/api/demo/start` | Demo modunu başlat (isteğe bağlı `{ "asset_id": "T-103" }`) |
+| POST | `/api/demo/stop` | Çalışan demoyu durdur |
 | WS | `/ws` | Her saniye anlık görüntü ve alarm olayları |

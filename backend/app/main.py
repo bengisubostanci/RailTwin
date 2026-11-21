@@ -19,6 +19,7 @@ from twin_core import FAULT_KINDS
 
 from .config import settings
 from .db import Database
+from .demo import DemoError, DemoRunner
 from .ml import TwinModels
 from .mqtt import MqttBridge
 from .scenario import BASELINE, PRESETS, STRATEGIES, ScenarioParams, run_scenario
@@ -55,6 +56,7 @@ models = TwinModels()
 twin = LiveTwin(db, models)
 bridge = MqttBridge(twin, db)
 hub = Hub()
+demo = DemoRunner(twin, lambda cmd: _control(cmd), lambda asset_id: _dispatch(asset_id))
 cache: aioredis.Redis | None = None
 
 
@@ -72,7 +74,7 @@ async def _evaluate_loop() -> None:
         await asyncio.sleep(1.0)
         try:
             await twin.evaluate()
-            snapshot = twin.snapshot()
+            snapshot = _snapshot()
             if cache is not None:
                 await cache.set(SNAPSHOT_KEY, json.dumps(snapshot, default=str), ex=30)
             await hub.broadcast({"type": "snapshot", "data": snapshot})
@@ -92,6 +94,7 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
+        await demo.close()
         for task in tasks:
             task.cancel()
         for task in tasks:
@@ -138,7 +141,11 @@ async def state():
         cached = await cache.get(SNAPSHOT_KEY)
         if cached:
             return json.loads(cached)
-    return twin.snapshot()
+    return _snapshot()
+
+
+def _snapshot() -> dict:
+    return {**twin.snapshot(), "demo": demo.view()}
 
 
 # --------------------------------------------------------------- varlıklar
@@ -182,6 +189,11 @@ async def inject_fault(asset_id: str, body: FaultRequest):
 @app.post("/api/assets/{asset_id}/maintenance")
 async def dispatch_maintenance(asset_id: str):
     _require_asset(asset_id)
+    return await _dispatch(asset_id)
+
+
+async def _dispatch(asset_id: str) -> dict:
+    """Bakım ekibini gönderir ve iş emrini kaydeder (API ve demo ortak kullanır)."""
     view = twin.asset_view(asset_id)
     await _control({"action": "repair", "asset_id": asset_id})
     return await db.create_work_order(asset_id, view["recommended_action"], view["cause"], view["health"])
@@ -252,13 +264,36 @@ async def scenario_run(body: ScenarioRequest):
     return await asyncio.to_thread(run_scenario, ScenarioParams(**body.model_dump()))
 
 
+# -------------------------------------------------------------------- demo
+class DemoRequest(BaseModel):
+    asset_id: str | None = None
+
+
+@app.get("/api/demo")
+async def demo_state():
+    return demo.view()
+
+
+@app.post("/api/demo/start", status_code=202)
+async def demo_start(body: DemoRequest):
+    try:
+        return await demo.start(body.asset_id)
+    except DemoError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/demo/stop")
+async def demo_stop():
+    return await demo.stop()
+
+
 # ---------------------------------------------------------------- websocket
 @app.websocket("/ws")
 async def websocket(ws: WebSocket):
     await ws.accept()
     hub.clients.add(ws)
     try:
-        await ws.send_text(json.dumps({"type": "snapshot", "data": twin.snapshot()}, default=str))
+        await ws.send_text(json.dumps({"type": "snapshot", "data": _snapshot()}, default=str))
         while True:
             await ws.receive_text()  # istemciler yalnızca dinler; bu, bağlantı kopmalarını algılar
     except WebSocketDisconnect:

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type AssetType, type AssetView } from "../api";
 import { AlertRow, Empty, Kpi, Panel, num, pct } from "../components/common";
+import DemoPanel from "../components/DemoPanel";
 import LineMap from "../components/LineMap";
 import { useLive } from "../live";
 
@@ -24,6 +25,8 @@ export default function Overview() {
 
   return (
     <div className="page">
+      <DemoPanel demo={snapshot.demo} />
+
       <div className="kpis">
         <Kpi label="Seferdeki trenler" value={`${k.trains_running}/${k.trains_total}`} />
         <Kpi label="Filo sağlığı" value={num(k.fleet_health)} unit="%" tone={tone(k.fleet_health)} />

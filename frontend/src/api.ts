@@ -72,6 +72,27 @@ export interface Snapshot {
   kpis: Kpis;
   assets: Record<string, AssetView>;
   alerts: Alert[];
+  demo?: DemoState;
+}
+
+export type DemoStepStatus = "pending" | "active" | "done" | "failed";
+
+export interface DemoStep {
+  key: string;
+  title: string;
+  status: DemoStepStatus;
+  detail: string | null;
+  /** Demonun başından bu adımın başladığı/bittiği ana kadar geçen saniye. */
+  at_s: number | null;
+}
+
+export interface DemoState {
+  state: "idle" | "running" | "done" | "failed" | "stopped";
+  asset_id: string | null;
+  asset_name: string | null;
+  message: string | null;
+  elapsed_s: number | null;
+  steps: DemoStep[];
 }
 
 export interface WorkOrder {
@@ -174,6 +195,8 @@ export const api = {
   maintenance: () => request<{ assets: AssetView[]; work_orders: WorkOrder[] }>("/api/maintenance"),
   scenarioConfig: () => request<ScenarioConfig>("/api/scenarios/config"),
   runScenario: (params: ScenarioParams) => post<ScenarioResult>("/api/scenarios/run", params),
+  startDemo: () => post<DemoState>("/api/demo/start"),
+  stopDemo: () => post<DemoState>("/api/demo/stop"),
 };
 
 export const METRIC_META: Record<string, { label: string; unit: string }> = {
