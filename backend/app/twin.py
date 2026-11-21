@@ -85,6 +85,7 @@ class LiveTwin:
         self.mqtt_connected = False
         self.environment = {"ambient_c": 18.0, "load_factor": 0.6}
         self._bootstrapped = False
+        self.trials: dict[str, dict] = {}  # varlık → açık arıza denemesi
 
     # ------------------------------------------------------------ veri alımı
     async def on_topology(self, topo: dict) -> None:
@@ -191,6 +192,8 @@ class LiveTwin:
                 alert = await self.db.open_alert(key[0], key[1], severity, source, message)
                 self.active_alerts[key] = alert
                 self.events.append({"type": "alert_opened", "alert": alert})
+                if source == "ml":
+                    await self._trial_detected(key[0], now)
             elif SEVERITY_RANK[severity] > SEVERITY_RANK[alert["severity"]]:
                 alert.update(severity=severity, message=message)
                 await self.db.update_alert(alert["id"], severity, message)
@@ -205,6 +208,25 @@ class LiveTwin:
                 self._clear_since.pop(key, None)
                 await self.db.resolve_alert(alert["id"])
                 self.events.append({"type": "alert_resolved", "alert": alert})
+
+    # ------------------------------------------------------- arıza denemeleri
+    async def start_trial(self, asset_id: str, kind: str, expected_cause: str | None) -> None:
+        await self.close_trial(asset_id)
+        row = await self.db.create_trial(asset_id, kind, expected_cause)
+        self.trials[asset_id] = {"id": row["id"], "t0": time.monotonic(), "detected": False}
+
+    async def _trial_detected(self, asset_id: str, now: float) -> None:
+        trial = self.trials.get(asset_id)
+        if trial is None or trial["detected"]:
+            return
+        trial["detected"] = True
+        health = self.health.get(asset_id)
+        await self.db.mark_trial_detected(trial["id"], round(now - trial["t0"], 1), health.cause if health else None)
+
+    async def close_trial(self, asset_id: str) -> None:
+        trial = self.trials.pop(asset_id, None)
+        if trial is not None:
+            await self.db.close_trial(trial["id"])
 
     def acknowledge(self, alert_id: int) -> None:
         for alert in self.active_alerts.values():

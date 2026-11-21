@@ -6,9 +6,11 @@ import asyncio
 import contextlib
 import json
 import logging
+import random
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
 
 import redis.asyncio as aioredis
@@ -21,8 +23,9 @@ from twin_core import FAULT_KINDS
 from .config import settings
 from .db import Database
 from .demo import DemoError, DemoRunner
+from .evaluation import FAULT_SIGNATURE, BenchmarkManager, live_summary
 from .explain import bad_direction, explain
-from .ml import TwinModels
+from .ml import MODEL_VERSION, TwinModels
 from .mqtt import MqttBridge
 from .scenario import BASELINE, PRESETS, STRATEGIES, ScenarioParams, run_scenario
 from .twin import LiveTwin
@@ -58,6 +61,11 @@ models = TwinModels()
 twin = LiveTwin(db, models)
 bridge = MqttBridge(twin, db)
 hub = Hub()
+benchmark = BenchmarkManager(
+    models,
+    Path(settings.model_cache_dir) / f"benchmark-v{MODEL_VERSION}-{settings.baseline_steps}.json"
+    if settings.model_cache_dir else None,
+)
 demo = DemoRunner(twin, lambda cmd: _control(cmd), lambda asset_id: _dispatch(asset_id))
 cache: aioredis.Redis | None = None
 
@@ -97,6 +105,7 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         await demo.close()
+        await benchmark.close()
         for task in tasks:
             task.cancel()
         for task in tasks:
@@ -207,8 +216,10 @@ async def inject_fault(asset_id: str, body: FaultRequest):
     asset_type = _require_asset(asset_id)
     if body.kind is not None and body.kind not in FAULT_KINDS[asset_type]:
         raise HTTPException(422, f"{body.kind}, {asset_type} türü için geçerli bir arıza değil")
-    await _control({"action": "inject_fault", "asset_id": asset_id, "kind": body.kind})
-    return {"status": "injected", "asset_id": asset_id, "kind": body.kind or "random"}
+    # Türü burada seç ki canlı performans kaydı beklenen sebebi bilsin.
+    kind = body.kind or random.choice(FAULT_KINDS[asset_type])
+    await _control({"action": "inject_fault", "asset_id": asset_id, "kind": kind})
+    return {"status": "injected", "asset_id": asset_id, "kind": kind}
 
 
 @app.post("/api/assets/{asset_id}/maintenance")
@@ -229,6 +240,11 @@ async def _control(command: dict) -> None:
         await bridge.send_control(command)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
+    # Arayüzden ve demodan gelen tüm arıza/onarım komutları buradan geçer: canlı performans kaydı.
+    if command["action"] == "inject_fault" and command.get("kind"):
+        await twin.start_trial(command["asset_id"], command["kind"], FAULT_SIGNATURE.get(command["kind"]))
+    elif command["action"] == "repair":
+        await twin.close_trial(command["asset_id"])
 
 
 class EnvironmentRequest(BaseModel):
@@ -287,6 +303,22 @@ async def scenario_config():
 @app.post("/api/scenarios/run")
 async def scenario_run(body: ScenarioRequest):
     return await asyncio.to_thread(run_scenario, ScenarioParams(**body.model_dump()))
+
+
+# ---------------------------------------------------------- model performansı
+@app.get("/api/model/performance")
+async def model_performance():
+    trials = await db.trials(30)
+    return {"benchmark": benchmark.view(), "live": {"summary": live_summary(trials), "trials": trials}}
+
+
+@app.post("/api/model/benchmark", status_code=202)
+async def model_benchmark():
+    try:
+        benchmark.start(twin.time_scale if twin.time_scale > 1 else 5.0)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return benchmark.view()
 
 
 # -------------------------------------------------------------------- demo

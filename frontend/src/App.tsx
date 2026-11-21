@@ -6,6 +6,7 @@ import Overview from "./pages/Overview";
 import Assets from "./pages/Assets";
 import AssetDetail from "./pages/AssetDetail";
 import Maintenance from "./pages/Maintenance";
+import Model from "./pages/Model";
 import Scenarios from "./pages/Scenarios";
 
 const NAV = [
@@ -13,6 +14,7 @@ const NAV = [
   { to: "/assets", label: "Varlıklar" },
   { to: "/maintenance", label: "Bakım" },
   { to: "/scenarios", label: "Senaryolar" },
+  { to: "/model", label: "Model" },
 ];
 
 export default function App() {
@@ -65,6 +67,7 @@ export default function App() {
           <Route path="/assets/:id" element={<AssetDetail />} />
           <Route path="/maintenance" element={<Maintenance />} />
           <Route path="/scenarios" element={<Scenarios />} />
+          <Route path="/model" element={<Model />} />
         </Routes>
       </main>
     </div>

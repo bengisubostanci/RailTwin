@@ -95,6 +95,63 @@ export interface DemoState {
   steps: DemoStep[];
 }
 
+export interface BenchmarkFault {
+  kind: string;
+  asset_type: AssetType;
+  expected_cause: string;
+  trials: number;
+  detected: number;
+  detection_rate: number;
+  cause_correct: number;
+  cause_accuracy: number | null;
+  /** Arıza enjeksiyonundan alarma kadar geçen gerçek saniye (hat zamanı = × time_scale). */
+  mean_detect_s: number | null;
+  max_detect_s: number | null;
+}
+
+export interface BenchmarkResult {
+  created_at: string;
+  model_version: number;
+  seeds: number[];
+  time_scale: number;
+  duration_s: number;
+  overall: { trials: number; detection_rate: number; cause_accuracy: number | null; mean_detect_s: number | null };
+  faults: BenchmarkFault[];
+  false_alarms: {
+    events: number;
+    asset_hours: number;
+    per_1000_asset_hours: number | null;
+    conditions: { ambient_c: number; load_factor: number }[];
+  };
+}
+
+export interface BenchmarkState {
+  status: "idle" | "running" | "ready" | "failed";
+  progress: number;
+  error: string | null;
+  result: BenchmarkResult | null;
+}
+
+export interface FaultTrial {
+  id: number;
+  asset_id: string;
+  kind: string;
+  expected_cause: string | null;
+  injected_at: string;
+  detected_at: string | null;
+  detect_s: number | null;
+  detected_cause: string | null;
+  repaired_at: string | null;
+}
+
+export interface Performance {
+  benchmark: BenchmarkState;
+  live: {
+    summary: { trials: number; detected: number; missed: number; mean_detect_s: number | null; cause_accuracy: number | null };
+    trials: FaultTrial[];
+  };
+}
+
 export interface WorkOrder {
   id: number;
   created_at: string;
@@ -228,6 +285,8 @@ export const api = {
   maintenance: () => request<{ assets: AssetView[]; work_orders: WorkOrder[] }>("/api/maintenance"),
   scenarioConfig: () => request<ScenarioConfig>("/api/scenarios/config"),
   runScenario: (params: ScenarioParams) => post<ScenarioResult>("/api/scenarios/run", params),
+  performance: () => request<Performance>("/api/model/performance"),
+  runBenchmark: () => post<BenchmarkState>("/api/model/benchmark"),
   startDemo: () => post<DemoState>("/api/demo/start"),
   stopDemo: () => post<DemoState>("/api/demo/stop"),
 };

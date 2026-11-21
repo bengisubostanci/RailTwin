@@ -140,6 +140,12 @@ main { padding: 18px 20px 40px; max-width: 1500px; width: 100%; margin: 0 auto; 
 .explain-timeline .ongoing::before { background: var(--critical); animation: pulse 1.2s ease-in-out infinite; }
 @media (max-width: 1100px) { .explain { grid-template-columns: minmax(0, 1fr); } }
 
+/* --------------------------------------------------------- Model performansı */
+.bench-progress { display: flex; align-items: center; gap: 10px; min-width: 200px; font-variant-numeric: tabular-nums; }
+.bench-progress .hbar { flex: 1; max-width: none; }
+.bench-note { font-size: 12px; line-height: 1.55; margin: 12px 0 0; }
+.page .panel .kpis { margin-bottom: 14px; }
+
 /* ------------------------------------------------------------------ KPI'lar */
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
 .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }

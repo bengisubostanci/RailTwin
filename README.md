@@ -17,6 +17,7 @@ sonuçlanacağını gösterir.
 | **Kestirimci bakım** | Varlık başına ML sağlık puanı (%0–100), olası arızalı bileşen, eğilime dayalı kritiğe kalan süre tahmini ve önceliklendirilmiş iş kuyruğu. |
 | **Arıza enjeksiyonu** | Arayüzden bir bozulma (rulman aşırı ısınması, tekerlek düzlüğü, fren kaçağı, ray kusuru, makas aşınması, …) enjekte edin ve modelin onu yakalamasını izleyin. Ardından gidermek için bakım ekibi gönderin. |
 | **Sağlık neden düştü?** | Varlık detayında, her sensörün beklenen değerden sapmasının zaman grafiği ve son düşüşün açıklaması: sapmanın hangi sensörde ve ne zaman başladığı, eşiklerin ne zaman aşıldığı, diğer sensörlerin normal kalıp kalmadığı ve modelin sorunu sağlık sarı bölgeye inmeden ne kadar önce gördüğü. Geçmiş veritabanında tutulur, sayfa yenilenince kaybolmaz. |
+| **Model performansı** | "Model ne kadar iyi?" sorusuna sayısal cevap. Kıyaslama, her arıza türünü farklı simüle hatlarda enjekte eder; tespit oranını, alarm süresini, sebebin doğru bulunma oranını ve arızasız hatlarda sert hava değişimleri altında yanlış alarm sıklığını ölçer. Canlı kayıt ise arayüzden ve demodan enjekte edilen her arızanın kaç saniyede ve hangi sebeple yakalandığını listeler. |
 | **Demo modu** | Tek tıkla baştan sona bir arıza hikâyesi: sağlıklı bir trene rulman arızası enjekte edilir, modelin fark etmesi, kritik alarm, bakım ekibinin gönderilmesi ve toparlanma Genel Bakış'ta adım adım gösterilir. Sunumlar için. |
 | **Senaryo analizi** | Sefer aralığını, filo büyüklüğünü, talebi, hava durumunu, hat hızını veya bakım stratejisini değiştirin; dakiklik, arızalar, hat aşınması, enerji, CO₂ ve maliyeti bugünkü mevcut durumla karşılaştırın (Monte Carlo). |
 
@@ -150,6 +151,8 @@ cd frontend && npm install && npm run dev   # http://localhost:5173, /api ve /ws
 | POST | `/api/environment` | Sahadaki ortam sıcaklığını / yolcu talebini ayarla |
 | GET | `/api/maintenance` | Önceliklendirilmiş kuyruk ve iş emirleri |
 | POST | `/api/scenarios/run` | Senaryo analizi çalıştır |
+| GET | `/api/model/performance` | Kıyaslama sonucu ve canlı arıza kaydı |
+| POST | `/api/model/benchmark` | Kıyaslamayı arka planda çalıştır (birkaç dakika sürer; sonuç model sürümü için saklanır) |
 | POST | `/api/demo/start` | Demo modunu başlat (isteğe bağlı `{ "asset_id": "T-103" }`) |
 | POST | `/api/demo/stop` | Çalışan demoyu durdur |
 | WS | `/ws` | Her saniye anlık görüntü ve alarm olayları |

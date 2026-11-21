@@ -40,6 +40,19 @@ CREATE TABLE IF NOT EXISTS scores (
 SELECT create_hypertable('scores', 'time', if_not_exists => TRUE);
 CREATE INDEX IF NOT EXISTS scores_asset_metric_time ON scores (asset_id, metric, time DESC);
 
+-- Arayüzden/demodan enjekte edilen arızalar ve modelin bunları ne zaman, hangi sebeple yakaladığı.
+CREATE TABLE IF NOT EXISTS fault_trials (
+    id             SERIAL PRIMARY KEY,
+    asset_id       TEXT NOT NULL,
+    kind           TEXT NOT NULL,
+    expected_cause TEXT,
+    injected_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    detected_at    TIMESTAMPTZ,
+    detect_s       DOUBLE PRECISION,
+    detected_cause TEXT,
+    repaired_at    TIMESTAMPTZ
+);
+
 CREATE TABLE IF NOT EXISTS alerts (
     id           BIGSERIAL PRIMARY KEY,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -199,6 +212,32 @@ class Database:
                 asset_id, action, cause, health,
             )
         return _row(row)
+
+    # ------------------------------------------------------- arıza denemeleri
+    async def create_trial(self, asset_id: str, kind: str, expected_cause: str | None) -> dict:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "INSERT INTO fault_trials (asset_id, kind, expected_cause) VALUES ($1, $2, $3) RETURNING *",
+                asset_id, kind, expected_cause,
+            )
+        return _row(row)
+
+    async def mark_trial_detected(self, trial_id: int, detect_s: float, cause: str | None) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE fault_trials SET detected_at = now(), detect_s = $2, detected_cause = $3 WHERE id = $1",
+                trial_id, detect_s, cause,
+            )
+
+    async def close_trial(self, trial_id: int) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute("UPDATE fault_trials SET repaired_at = now() WHERE id = $1 AND repaired_at IS NULL",
+                               trial_id)
+
+    async def trials(self, limit: int) -> list[dict]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT * FROM fault_trials ORDER BY injected_at DESC LIMIT $1", limit)
+        return [_row(r) for r in rows]
 
     async def work_orders(self, limit: int) -> list[dict]:
         async with self.pool.acquire() as conn:

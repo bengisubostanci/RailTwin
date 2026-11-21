@@ -139,3 +139,21 @@ def test_explanation_names_the_failing_bearing_before_health_turns_red(models):
     assert e["onset"]["t"] >= (t0 + timedelta(seconds=400)).isoformat(), "sapma arızadan önce başlayamaz"
     assert e["lead_s"] is not None and e["lead_s"] > 0
     assert e["recovered_at"] is not None
+
+
+def test_benchmark_detects_every_fault_without_false_alarms(models, monkeypatch):
+    """Kısaltılmış kıyaslama: her arıza türü yakalanır, sebep doğrudur, arızasız hatta alarm yoktur."""
+    from app import evaluation
+
+    monkeypatch.setattr(evaluation, "WARMUP_TICKS", 260)
+    monkeypatch.setattr(evaluation, "FAULT_TICKS", 150)
+    monkeypatch.setattr(evaluation, "HEALTHY_PHASES", ((42.0, 1.15), (-12.0, 0.2)))
+    monkeypatch.setattr(evaluation, "HEALTHY_PHASE_TICKS", 80)
+    seen = []
+    result = evaluation.run_benchmark(models, TIME_SCALE, seeds=(101,), progress=seen.append)
+
+    assert seen and seen[-1] == 1.0
+    assert result["overall"]["detection_rate"] == 1.0
+    assert result["overall"]["cause_accuracy"] == 1.0
+    assert {f["kind"] for f in result["faults"]} == set(evaluation.FAULT_SIGNATURE)
+    assert result["false_alarms"]["events"] == 0
