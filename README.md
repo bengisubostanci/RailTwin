@@ -6,6 +6,7 @@ göründüğünü öğrenir, her varlığı gerçek zamanlı olarak puanlar ve b
 Senaryo analizi (Ya olursa?) motoru ise işletmedeki değişikliklerin önümüzdeki haftalarda nasıl
 sonuçlanacağını gösterir.
 
+[![CI](https://github.com/bengisubostanci/RailTwin/actions/workflows/ci.yml/badge.svg)](https://github.com/bengisubostanci/RailTwin/actions/workflows/ci.yml)
 ![stack](https://img.shields.io/badge/stack-FastAPI%20·%20TimescaleDB%20·%20Redis%20·%20MQTT%20·%20React-3fb7ff)
 
 ## Neler yapar
@@ -109,6 +110,11 @@ python -m venv .venv
 .venv/Scripts/pip install -e twin_core -r backend/requirements.txt pytest   # macOS/Linux'ta bin/
 cd backend && ../.venv/Scripts/python -m pytest
 ```
+
+Python 3.11 veya üstü gerekir (simülatör `except*` sözdizimini kullanır; Docker imajları 3.12 ile gelir).
+
+GitHub Actions her push'ta ve pull request'te üç kontrol çalıştırır: backend testleri, frontend tip
+kontrolü ve derlemesi, tüm Docker imajlarının derlenmesi ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
 Altyapıyı Docker'da, uygulamaları yerelde çalıştırın:
 
